@@ -5,11 +5,10 @@
  * without binding a port.
  */
 
-const express = require('express');
-const cors = require('cors');
-const cookieParser = require('cookie-parser');
-
-const chatRoutes = require('./routes/chat');
+import express from 'express';
+import cors from 'cors';
+import cookieParser from 'cookie-parser';
+import chatRoutes from './routes/chat.js';
 
 const app = express();
 
@@ -43,4 +42,4 @@ app.use((err, req, res, next) => {
   return res.status(500).json({ error: 'Internal server error.' });
 });
 
-module.exports = app;
+export default app;

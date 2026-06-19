@@ -2,9 +2,8 @@
  * src/controllers/chatController.js
  * Request handlers for POST /api/ai/chat and POST /api/ai/chat/stream.
  */
-
-const { groqClient, GROQ_DEFAULTS } = require('../config/groq');
-const { buildSystemPrompt } = require('../prompts/systemPrompt');
+import { groqClient, GROQ_DEFAULTS } from '../config/groq.js';
+import { buildSystemPrompt } from '../prompts/systemPrompt.js';
 
 function validateBody(req, res) {
   const { message } = req.body || {};
@@ -27,7 +26,7 @@ function validateBody(req, res) {
  * POST /api/ai/chat
  * Standard, non-streaming completion.
  */
-async function handleChat(req, res) {
+export async function handleChat(req, res) {
   const validated = validateBody(req, res);
   if (!validated) return;
 
@@ -71,7 +70,7 @@ async function handleChat(req, res) {
  * Same request contract as handleChat, but streams the reply token-by-token
  * over Server-Sent Events.
  */
-async function handleChatStream(req, res) {
+export async function handleChatStream(req, res) {
   const validated = validateBody(req, res);
   if (!validated) return;
 
@@ -82,7 +81,7 @@ async function handleChatStream(req, res) {
     'Content-Type': 'text/event-stream',
     'Cache-Control': 'no-cache',
     Connection: 'keep-alive',
-    'X-Accel-Buffering': 'no', // disable proxy buffering (nginx) for real-time flush
+    'X-Accel-Buffering': 'no', 
   });
 
   const sendEvent = (data) => {
@@ -126,8 +125,3 @@ async function handleChatStream(req, res) {
     }
   }
 }
-
-module.exports = {
-  handleChat,
-  handleChatStream,
-};

@@ -5,12 +5,12 @@
  * id (falls back to IP if, for some reason, this runs before auth).
  */
 
-const rateLimit = require('express-rate-limit');
+import rateLimit from 'express-rate-limit';
 
 const WINDOW_MS = parseInt(process.env.RATE_LIMIT_WINDOW_MS, 10) || 60000;
 const MAX_REQUESTS = parseInt(process.env.RATE_LIMIT_MAX, 10) || 20;
 
-const chatRateLimiter = rateLimit({
+export const chatRateLimiter = rateLimit({
   windowMs: WINDOW_MS,
   max: MAX_REQUESTS,
   standardHeaders: true,
@@ -27,7 +27,3 @@ const chatRateLimiter = rateLimit({
     });
   },
 });
-
-module.exports = {
-  chatRateLimiter,
-};

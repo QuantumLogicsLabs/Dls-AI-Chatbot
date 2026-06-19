@@ -6,9 +6,9 @@
  * no second login is required.
  */
 
-const jwt = require('jsonwebtoken');
+import jwt from 'jsonwebtoken';
 
-function extractToken(req) {
+export function extractToken(req) {
   const authHeader = req.headers.authorization || req.headers.Authorization;
 
   if (authHeader && authHeader.startsWith('Bearer ')) {
@@ -23,7 +23,7 @@ function extractToken(req) {
   return null;
 }
 
-function requireAuth(req, res, next) {
+export function requireAuth(req, res, next) {
   const token = extractToken(req);
 
   if (!token) {
@@ -47,13 +47,7 @@ function requireAuth(req, res, next) {
       return res.status(401).json({ error: message });
     }
 
-    // Same shape the main backend signs: at minimum `id` / `name`.
     req.user = decoded;
     next();
   });
 }
-
-module.exports = {
-  requireAuth,
-  extractToken,
-};

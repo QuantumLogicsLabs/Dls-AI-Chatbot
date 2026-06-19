@@ -5,9 +5,8 @@
  * process; only the JWT_SECRET is shared between the two.
  */
 
-require('dotenv').config();
-
-const app = require('./src/app');
+import 'dotenv/config';
+import app from './src/app.js'; 
 
 const PORT = process.env.PORT || 5100;
 

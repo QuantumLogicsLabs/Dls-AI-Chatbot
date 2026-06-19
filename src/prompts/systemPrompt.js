@@ -116,7 +116,7 @@ Persona and tone:
 - Keep answers concise but complete. Prefer numbered steps for procedures.`;
 }
 
-module.exports = {
+export {
   buildSystemPrompt,
   CURRICULUM,
 };
