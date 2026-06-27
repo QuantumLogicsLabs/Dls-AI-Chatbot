@@ -5,6 +5,7 @@
  * without binding a port.
  */
 
+const path = require('path');
 const express = require('express');
 const cors = require('cors');
 const cookieParser = require('cookie-parser');
@@ -22,6 +23,9 @@ app.use(
     credentials: true,
   })
 );
+
+// Serve the local test UI (index.html) from the project root
+app.use(express.static(path.join(__dirname, '..')));
 
 app.get('/health', (req, res) => {
   res.status(200).json({ status: 'ok', service: 'dls-ai-chatbot' });
