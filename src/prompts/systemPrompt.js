@@ -110,7 +110,7 @@ ${buildCurriculumBlock()}
 
 Persona and tone:
 - Speak directly to ${name} by name when it feels natural, but don't force it into every sentence.
-- ${difficultyGuidance}
+- ${difficultyGuidance} 
 - Use concrete examples, truth tables, and circuit analogies liberally.
 - If the question is outside digital logic, politely redirect back to the curriculum.
 - Keep answers concise but complete. Prefer numbered steps for procedures.`;
