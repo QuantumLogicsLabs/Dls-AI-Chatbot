@@ -1,10 +1,13 @@
 /**
  * src/controllers/chatController.js
  * Request handlers for POST /api/ai/chat and POST /api/ai/chat/stream.
+ * Now RAG-enabled: retrieves relevant DLD/DLS book chunks from Pinecone
+ * before sending the prompt to Groq.
  */
 
 const { groqClient, GROQ_DEFAULTS } = require('../config/groq');
 const { buildSystemPrompt } = require('../prompts/systemPrompt');
+const { retrieveContext } = require('../services/retrieval');
 
 function validateBody(req, res) {
   const { message } = req.body || {};
@@ -24,15 +27,39 @@ function validateBody(req, res) {
 }
 
 /**
+ * Builds the final system prompt, injecting retrieved book context if available.
+ */
+async function buildRAGPrompt({ user, context, message }) {
+  const systemPrompt = buildSystemPrompt({ user, context });
+
+  // Search Pinecone for relevant chunks from DLD/DLS books
+  const bookContext = await retrieveContext(message);
+
+  if (!bookContext) {
+    return systemPrompt; // No relevant chunks found — use base prompt
+  }
+
+  return `${systemPrompt}
+
+---
+RELEVANT CURRICULUM CONTENT (retrieved from DLD/DLS books):
+Use the following excerpts to answer the student's question accurately.
+If the answer is directly in the content below, prioritize it over general knowledge.
+
+${bookContext}
+---`;
+}
+
+/**
  * POST /api/ai/chat
- * Standard, non-streaming completion.
+ * Standard, non-streaming completion with RAG.
  */
 async function handleChat(req, res) {
   const validated = validateBody(req, res);
   if (!validated) return;
 
   const { message, context } = validated;
-  const systemPrompt = buildSystemPrompt({ user: req.user, context });
+  const systemPrompt = await buildRAGPrompt({ user: req.user, context, message });
 
   try {
     const completion = await groqClient.chat.completions.create({
@@ -68,21 +95,20 @@ async function handleChat(req, res) {
 
 /**
  * POST /api/ai/chat/stream
- * Same request contract as handleChat, but streams the reply token-by-token
- * over Server-Sent Events.
+ * Streaming SSE completion with RAG.
  */
 async function handleChatStream(req, res) {
   const validated = validateBody(req, res);
   if (!validated) return;
 
   const { message, context } = validated;
-  const systemPrompt = buildSystemPrompt({ user: req.user, context });
+  const systemPrompt = await buildRAGPrompt({ user: req.user, context, message });
 
   res.writeHead(200, {
     'Content-Type': 'text/event-stream',
     'Cache-Control': 'no-cache',
     Connection: 'keep-alive',
-    'X-Accel-Buffering': 'no', // disable proxy buffering (nginx) for real-time flush
+    'X-Accel-Buffering': 'no',
   });
 
   const sendEvent = (data) => {
