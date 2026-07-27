@@ -1,34 +1,30 @@
-# /data — DLD/DLS & COAL Book Folder
+# Dls-AI-DataSets
+Created by a Commander on QuantumLogics Community.
 
-Place your Digital Logic Design (DLD) or Digital Logic Studio (DLS) books here.  
-Place COAL textbooks and notes here as well (e.g. COAL course book PDF).
+## Added Datasets
 
-## Supported formats
-- `.pdf` — PDF textbooks
-- `.txt` — Plain text files
-- `.md` — Markdown outlines (e.g. `COAL_COURSE_OUTLINE.md`)
+### Digital Logic & Computer Organization
+- Computer Organization with ARM64.txt
+- Digital Logic and Computer Design (M. Morris Mano).txt
+- An Animated Introduction to Digital Logic Design.txt
+- DCAP108_DIGITAL_CIRCUITS_AND_LOGIC_DESIGNS.txt
+- Logic_Design.txt
+- TBQ_Feher_DigitalLogicbw.txt
+- DigitalLogic.txt
+- Fundamentals_of_Digital_Logic_with_Verilog_Design (3rd edition).txt
+- engr250lecture.txt
+- 901220_logic notes.txt
+- book.txt
+- cosc205.txt
 
-## How to ingest
-
-After adding your books, run:
-
-```bash
-node scripts/ingest.js
-```
-
-This will chunk the books and upload them to Pinecone.
-The chatbot will then answer questions based on your curriculum content.
-
-## Suggested books
-- Morris Mano — Digital Design
-- Floyd — Digital Fundamentals
-- Tocci — Digital Systems
-- COAL / Computer Organization textbook (your course book)
-- Any DLS or COAL course notes or slides (exported as PDF/text)
-
-## COAL curriculum structure
-See `COAL_COURSE_OUTLINE.md` in this folder and `frontend/src/data/coalCourseOutline.js` for the full module breakdown used on the platform.
-
-## Notes
-- Do NOT commit actual book PDFs to git (copyright). They are gitignored.
-- You can re-run the ingestion script any time you add new books.
+### Assembly Language / Computer Organization (COAL)
+- The Art of Assembly Language 2nd Edition (Randall Hyde).txt
+- assembly64.txt (x86-64 Assembly Language Programming with Ubuntu — Ed Jorgensen)
+- pcasm-book.txt (PC Assembly Language — Paul A. Carter)
+- MIPStextSMv11 (1).txt (MIPS Assembly Language Programming Using QtSpim — Ed Jorgensen)
+- ProgrammingGroundUp-1-0-booksize.txt (Programming from the Ground Up — Jonathan Bartlett)
+- Introduction to Assembly Language Programming_ From Soup to Nuts_.txt (Charles W. Kann)
+- Art Of Intel x86 Assembly.txt
+- Assembly Language - Student version.txt
+- Assembly Language Programming Notes by Bial Hashmi.txt
+- [Mostafa_Abd-El-Barr__Hesham_El-Rewini]_Fundamenta(BookZZ.org).txt

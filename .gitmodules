@@ -1,3 +1,6 @@
 [submodule "website"]
 	path = website
 	url = https://github.com/QuantumLogicsLabs/DlsAIChatbot-Website.git
+[submodule "data]
+	path = data
+	url = https://github.com/QuantumLogicsLabs/Dls-AI-DataSets.git
