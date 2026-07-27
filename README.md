@@ -10,10 +10,13 @@ The DLS AI Chatbot is a dedicated microservice that plugs into the existing Bool
 
 ```
 Dls-AI-Chatbot/
-├── data/
-│   └── README.md                # Where to drop DLD/DLS books for ingestion
+├── .github/workflows/
+│   └── ingest-datasets.yml      # Hourly + dispatch Pinecone ingest from DataSets
+├── data/                        # git submodule → QuantumLogicsLabs/Dls-AI-DataSets
+│   └── README.md
 ├── scripts/
-│   └── ingest.js                # Chunks books and uploads to Pinecone
+│   ├── ingest.js                # Incremental chunk + upsert to Pinecone
+│   └── ingest-manifest.json     # Per-file SHA state (survives CI runs)
 ├── src/
 │   ├── config/
 │   │   ├── groq.js              # Groq client initialization
@@ -120,21 +123,46 @@ npm install
 
 ## Ingesting Curriculum Books (RAG setup)
 
-Before the bot can answer from your textbooks, you need to ingest them into Pinecone:
+Curriculum files live in the **[Dls-AI-DataSets](https://github.com/QuantumLogicsLabs/Dls-AI-DataSets)** repo, checked out as the `data/` git submodule.
 
-1. Drop `.pdf` or `.txt` files into the `/data` folder. See `data/README.md` for suggested books.
-2. Run the ingestion script:
+### Local ingest
+
+1. Initialize / update the submodule:
+   ```bash
+   git submodule update --init --remote data
+   ```
+2. Run incremental ingest (skips files whose content SHA matches `scripts/ingest-manifest.json`):
    ```bash
    npm run ingest
    ```
-   or directly:
+   Force a full re-ingest:
    ```bash
-   node scripts/ingest.js
+   npm run ingest:force
+   # or: node scripts/ingest.js --force
    ```
-3. The script chunks each book (500 words per chunk, 50-word overlap), labels chunks with the source filename, and uploads them to the `dls-books` namespace in your Pinecone index, in batches of 50 with a 15-second pause between batches to respect rate limits.
-4. Confirm the upload in your Pinecone dashboard — vector count in the `dls-books` namespace should match the total chunks printed at the end of the script.
+3. The script chunks each book (500 words, 50-word overlap), uses deterministic vector IDs, deletes prior vectors when a file changes, and upserts to the `dls-books` namespace in batches of 50 (15s pause between batches).
+4. Confirm in the Pinecone dashboard that the `dls-books` namespace reflects the new chunks.
 
-Re-run `npm run ingest` any time you add new books. Book files are git-ignored (copyright) — only `data/README.md` is tracked.
+### Automated hourly ingest (GitHub Actions)
+
+[`.github/workflows/ingest-datasets.yml`](.github/workflows/ingest-datasets.yml) runs on:
+
+| Trigger | When |
+|---|---|
+| `schedule` (`0 * * * *`) | Every hour |
+| `workflow_dispatch` | Manual run from the Actions tab |
+| `repository_dispatch` (`datasets-updated`) | When DataSets pushes and dispatches |
+
+Each run: updates the `data` submodule to latest `main` → `npm ci` → `npm run ingest` → commits an updated submodule pointer and `scripts/ingest-manifest.json` if they changed.
+
+**Repo secrets (Dls-AI-Chatbot):**
+
+| Secret | Required | Purpose |
+|---|---|---|
+| `PINECONE_API_KEY` | Yes | Pinecone API access |
+| `PINECONE_INDEX_NAME` | No | Defaults to `dls-chatbot` inside the script when unset |
+
+**DataSets secret** (for near-real-time dispatch): `CHATBOT_DISPATCH_TOKEN` — PAT that can create `repository_dispatch` events on this repo. See the DataSets README.
 
 ---
 
@@ -341,7 +369,8 @@ Pinecone's free tier also has its own request rate limits — `scripts/ingest.js
 ## Notes
 
 - `.env` is git-ignored; `.env.example` is tracked.
-- Book files in `/data` (`.pdf`, `.txt`) are git-ignored for copyright reasons. Only `data/README.md` is tracked.
+- `/data` is a submodule pointing at [Dls-AI-DataSets](https://github.com/QuantumLogicsLabs/Dls-AI-DataSets). Parent `.gitignore` still ignores loose local `data/*.txt` / `data/*.pdf` outside submodule workflows.
+- `scripts/ingest-manifest.json` is tracked so CI incremental ingest survives across hourly runs.
 - `package-lock.json` is tracked for reproducible installs.
 - The service is stateless per request — conversation history is not persisted server-side, and RAG retrieval runs fresh on every message with no memory of prior turns. If you want multi-turn memory, send the last N message pairs in the request body and include them in the prompt builder.
 - The bundled local UI is meant for quick testing and onboarding, while the API remains the integration surface for Boolforge or any other frontend.

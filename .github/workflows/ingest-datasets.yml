@@ -1,0 +1,65 @@
+name: Ingest Datasets
+
+on:
+  schedule:
+    # Hourly — pulls latest Dls-AI-DataSets and runs incremental Pinecone ingest
+    - cron: "0 * * * *"
+  workflow_dispatch:
+  repository_dispatch:
+    types: [datasets-updated]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ingest-datasets
+  cancel-in-progress: false
+
+jobs:
+  ingest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Update data submodule to latest main
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git submodule sync --recursive
+          git submodule update --init --remote --merge data
+          cd data
+          git checkout main || git checkout -B main origin/main
+          git pull --ff-only origin main
+          cd ..
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run incremental ingest
+        env:
+          PINECONE_API_KEY: ${{ secrets.PINECONE_API_KEY }}
+          PINECONE_INDEX_NAME: ${{ secrets.PINECONE_INDEX_NAME }}
+        run: npm run ingest
+
+      - name: Commit submodule pointer and ingest manifest
+        run: |
+          git add data scripts/ingest-manifest.json
+          if git diff --staged --quiet; then
+            echo "No submodule or manifest changes to commit."
+            exit 0
+          fi
+          git commit -m "chore(ingest): update data submodule and ingest manifest [skip ci]"
+          git push origin HEAD:${{ github.ref_name }}

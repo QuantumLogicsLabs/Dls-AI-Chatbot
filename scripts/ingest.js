@@ -1,47 +1,57 @@
 /**
  * scripts/ingest.js
- * One-time script to read DLD/DLS books from the /data folder,
- * chunk them, and upload to Pinecone using integrated inference
+ * Reads DLD/DLS books from the /data folder (Dls-AI-DataSets submodule),
+ * chunks them, and uploads to Pinecone using integrated inference
  * (llama-text-embed-v2 — Pinecone handles embedding automatically).
+ *
+ * Incremental by default: skips files whose content SHA matches
+ * scripts/ingest-manifest.json. Use --force to re-ingest everything.
  *
  * Usage:
  *   node scripts/ingest.js
+ *   node scripts/ingest.js --force
+ *   npm run ingest
+ *   npm run ingest:force
  *
  * Supported file types: .txt, .pdf
- * Place your books inside the /data folder before running.
  */
 
 require('dotenv').config();
 
+const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
-const { v4: uuidv4 } = require('uuid');
 const { Pinecone } = require('@pinecone-database/pinecone');
 
 // ── Config ────────────────────────────────────────────────────────────────────
 const DATA_DIR = path.join(__dirname, '..', 'data');
+const MANIFEST_PATH = path.join(__dirname, 'ingest-manifest.json');
 const INDEX_NAME = process.env.PINECONE_INDEX_NAME || 'dls-chatbot';
 const NAMESPACE = 'dls-books';
-const CHUNK_SIZE = 500;      // words per chunk
-const CHUNK_OVERLAP = 50;    // words overlap between chunks
-const BATCH_SIZE = 50;       // records per upsert batch
+const CHUNK_SIZE = 500; // words per chunk
+const CHUNK_OVERLAP = 50; // words overlap between chunks
+const BATCH_SIZE = 50; // records per upsert batch
 const BATCH_DELAY_MS = 15000; // 15s delay between batches to stay under rate limit
 
+const FORCE = process.argv.includes('--force');
+
 // ── Pinecone client ───────────────────────────────────────────────────────────
+if (!process.env.PINECONE_API_KEY) {
+  console.error('❌ PINECONE_API_KEY is missing. Set it in .env or the environment.');
+  process.exit(1);
+}
+
 const pinecone = new Pinecone({ apiKey: process.env.PINECONE_API_KEY });
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-/**
- * Splits text into overlapping word-based chunks.
- */
 function chunkText(text, chunkSize = CHUNK_SIZE, overlap = CHUNK_OVERLAP) {
   const words = text.split(/\s+/).filter(Boolean);
   const chunks = [];
 
   for (let i = 0; i < words.length; i += chunkSize - overlap) {
     const chunk = words.slice(i, i + chunkSize).join(' ');
-    if (chunk.trim().length > 50) { // skip tiny chunks
+    if (chunk.trim().length > 50) {
       chunks.push(chunk.trim());
     }
     if (i + chunkSize >= words.length) break;
@@ -50,33 +60,23 @@ function chunkText(text, chunkSize = CHUNK_SIZE, overlap = CHUNK_OVERLAP) {
   return chunks;
 }
 
-/**
- * Reads a .txt file and returns its text content.
- */
 function readTextFile(filePath) {
   return fs.readFileSync(filePath, 'utf-8');
 }
 
-/**
- * Reads a .pdf file and returns its text content.
- * Supports both pdf-parse v1 (default function) and v2 (PDFParse class with getText).
- */
 async function readPdfFile(filePath) {
   const pdfLib = require('pdf-parse');
 
-  // pdf-parse v1: module exports a function directly
   if (typeof pdfLib === 'function') {
     const buffer = fs.readFileSync(filePath);
     const data = await pdfLib(buffer);
     return data.text || '';
   }
 
-  // pdf-parse v2: exports { PDFParse } class with getText() method
   if (pdfLib.PDFParse) {
     const { PDFParse } = pdfLib;
     const parser = new PDFParse({ data: fs.readFileSync(filePath) });
     const result = await parser.getText();
-    // result.pages is an array of { text, num }
     if (result.pages && Array.isArray(result.pages)) {
       return result.pages.map((p) => p.text || '').join('\n');
     }
@@ -86,27 +86,47 @@ async function readPdfFile(filePath) {
   throw new Error('Unsupported pdf-parse version — cannot extract text.');
 }
 
-/**
- * Extracts a rough chapter name from filename.
- */
 function getChapterFromFilename(filename) {
-  return path.basename(filename, path.extname(filename))
+  return path
+    .basename(filename, path.extname(filename))
     .replace(/[-_]/g, ' ')
     .replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
-/**
- * Uploads records in batches using Pinecone integrated inference.
- * Pinecone SDK v8 expects upsertRecords({ records: [...] })
- */
+function sha256File(filePath) {
+  const hash = crypto.createHash('sha256');
+  hash.update(fs.readFileSync(filePath));
+  return hash.digest('hex');
+}
+
+function deterministicId(source, chunkIndex) {
+  return crypto.createHash('sha256').update(`${source}:${chunkIndex}`).digest('hex');
+}
+
+function loadManifest() {
+  if (!fs.existsSync(MANIFEST_PATH)) {
+    return {};
+  }
+  try {
+    return JSON.parse(fs.readFileSync(MANIFEST_PATH, 'utf-8'));
+  } catch (err) {
+    console.warn(`⚠️  Could not parse ingest manifest (${err.message}); starting fresh.`);
+    return {};
+  }
+}
+
+function saveManifest(manifest) {
+  fs.writeFileSync(MANIFEST_PATH, `${JSON.stringify(manifest, null, 2)}\n`, 'utf-8');
+}
+
 async function uploadBatch(index, records) {
-  // SDK v8 signature: upsertRecords(options) where options = { records: RecordArray }
-  // SDK v1-v7 signature: upsertRecords(records: RecordArray)
   try {
     await index.upsertRecords({ records });
   } catch (e) {
-    if (e?.message?.includes('records is not iterable') || e?.message?.includes('options.records')) {
-      // fallback: try passing array directly (older SDK)
+    if (
+      e?.message?.includes('records is not iterable') ||
+      e?.message?.includes('options.records')
+    ) {
       await index.upsertRecords(records);
     } else {
       throw e;
@@ -116,8 +136,18 @@ async function uploadBatch(index, records) {
 }
 
 /**
- * Sleep helper — used to respect Pinecone's rate limit.
+ * Removes prior vectors for a source file so changed content does not leave orphans.
  */
+async function deleteBySource(index, source) {
+  try {
+    await index.deleteMany({ filter: { source: { $eq: source } } });
+    console.log(`  🗑  Cleared previous vectors for source=${source}`);
+  } catch (err) {
+    // Some Pinecone configs disallow metadata-filter deletes; continue with upsert.
+    console.warn(`  ⚠️  Could not delete by source (${err.message}); upserting anyway.`);
+  }
+}
+
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -126,39 +156,53 @@ function sleep(ms) {
 
 async function main() {
   console.log('\n🚀 DLS Chatbot — Book Ingestion Script');
-  console.log('======================================\n');
+  console.log('======================================');
+  console.log(`Mode: ${FORCE ? 'force (re-ingest all)' : 'incremental'}\n`);
 
-  // Check data folder exists
   if (!fs.existsSync(DATA_DIR)) {
     console.error(`❌ /data folder not found at: ${DATA_DIR}`);
-    console.log('   Create a /data folder and add your DLD/DLS books (.txt or .pdf) into it.');
+    console.log('   Init the Dls-AI-DataSets submodule, or add .txt/.pdf books to /data.');
     process.exit(1);
   }
 
-  // Get list of supported files
-  const files = fs.readdirSync(DATA_DIR).filter((f) =>
-    ['.txt', '.pdf'].includes(path.extname(f).toLowerCase())
-  );
+  const files = fs
+    .readdirSync(DATA_DIR)
+    .filter((f) => ['.txt', '.pdf'].includes(path.extname(f).toLowerCase()))
+    .sort();
 
   if (!files.length) {
     console.error('❌ No .txt or .pdf files found in /data folder.');
-    console.log('   Add your DLD/DLS books to the /data folder and run again.');
+    console.log('   Pull the Dls-AI-DataSets submodule and run again.');
     process.exit(1);
   }
 
-  console.log(`📚 Found ${files.length} file(s): ${files.join(', ')}\n`);
+  console.log(`📚 Found ${files.length} file(s)\n`);
 
-  // Get Pinecone index with namespace
   const index = pinecone.index(INDEX_NAME).namespace(NAMESPACE);
+  const manifest = FORCE ? {} : loadManifest();
 
   let totalChunks = 0;
+  let ingestedFiles = 0;
+  let skippedFiles = 0;
 
   for (const file of files) {
     const filePath = path.join(DATA_DIR, file);
     const ext = path.extname(file).toLowerCase();
     const chapter = getChapterFromFilename(file);
+    const fileHash = sha256File(filePath);
 
-    console.log(`📖 Processing: ${file}`);
+    console.log(`📖 ${file}`);
+
+    if (!FORCE && manifest[file]?.sha256 === fileHash) {
+      console.log(`  ⏭  Unchanged (sha256 match) — skipping\n`);
+      skippedFiles += 1;
+      continue;
+    }
+
+    const isUpdate = Boolean(manifest[file]);
+    if (isUpdate || FORCE) {
+      await deleteBySource(index, file);
+    }
 
     let text = '';
     try {
@@ -180,34 +224,57 @@ async function main() {
     const chunks = chunkText(text);
     console.log(`  → ${chunks.length} chunks created`);
 
-    // Build records for Pinecone integrated inference
-    // "_node_type": "TextNode" is required for llama-text-embed-v2
     const records = chunks.map((chunk, idx) => ({
-      _id: uuidv4(),
+      _id: deterministicId(file, idx),
       text: chunk,
       source: file,
       chapter: chapter,
       chunk_index: idx,
+      content_sha256: fileHash,
     }));
 
-    // Upload in batches
     for (let i = 0; i < records.length; i += BATCH_SIZE) {
       const batch = records.slice(i, i + BATCH_SIZE);
       await uploadBatch(index, batch);
-      // Respect Pinecone free-tier rate limit: pause between batches
       if (i + BATCH_SIZE < records.length) {
         process.stdout.write(`  ⏳ Rate-limit pause (${BATCH_DELAY_MS / 1000}s)...\r`);
         await sleep(BATCH_DELAY_MS);
       }
     }
 
+    // Persist after each successful file so a mid-run failure does not mark unfinished work done.
+    manifest[file] = {
+      sha256: fileHash,
+      chunkCount: chunks.length,
+      ingestedAt: new Date().toISOString(),
+    };
+    saveManifest(manifest);
+
     totalChunks += chunks.length;
+    ingestedFiles += 1;
     console.log(`  ✅ Done: ${file}\n`);
+  }
+
+  // Drop manifest entries for files that no longer exist in /data
+  let pruned = 0;
+  for (const key of Object.keys(manifest)) {
+    if (!files.includes(key)) {
+      await deleteBySource(index, key);
+      delete manifest[key];
+      pruned += 1;
+    }
+  }
+  if (pruned > 0) {
+    saveManifest(manifest);
+    console.log(`🧹 Removed ${pruned} stale source(s) from Pinecone + manifest\n`);
   }
 
   console.log('======================================');
   console.log(`✅ Ingestion complete!`);
-  console.log(`   Total chunks uploaded: ${totalChunks}`);
+  console.log(`   Files ingested: ${ingestedFiles}`);
+  console.log(`   Files skipped:  ${skippedFiles}`);
+  console.log(`   Chunks uploaded this run: ${totalChunks}`);
+  console.log(`   Manifest: ${MANIFEST_PATH}`);
   console.log(`   Index: ${INDEX_NAME} | Namespace: ${NAMESPACE}`);
   console.log('\nYour chatbot will now answer from your DLD/DLS books! 🎉\n');
 }
