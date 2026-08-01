@@ -13,7 +13,7 @@
  *   npm run ingest
  *   npm run ingest:force
  *
- * Supported file types: .txt, .pdf
+ * Supported file types: .txt only
  */
 
 require('dotenv').config();
@@ -28,6 +28,7 @@ const DATA_DIR = path.join(__dirname, '..', 'data');
 const MANIFEST_PATH = path.join(__dirname, 'ingest-manifest.json');
 const INDEX_NAME = process.env.PINECONE_INDEX_NAME || 'dls-chatbot';
 const NAMESPACE = 'dls-books';
+const ALLOWED_EXTENSIONS = ['.txt'];
 const CHUNK_SIZE = 500; // words per chunk
 const CHUNK_OVERLAP = 50; // words overlap between chunks
 const BATCH_SIZE = 50; // records per upsert batch
@@ -167,12 +168,12 @@ async function main() {
 
   const files = fs
     .readdirSync(DATA_DIR)
-    .filter((f) => ['.txt', '.pdf'].includes(path.extname(f).toLowerCase()))
+    .filter((f) => ALLOWED_EXTENSIONS.includes(path.extname(f).toLowerCase()))
     .sort();
 
   if (!files.length) {
-    console.error('❌ No .txt or .pdf files found in /data folder.');
-    console.log('   Pull the Dls-AI-DataSets submodule and run again.');
+    console.error('❌ No .txt files found in /data folder.');
+    console.log('   Add .txt files to the data submodule and run again.');
     process.exit(1);
   }
 
