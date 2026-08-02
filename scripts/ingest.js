@@ -33,6 +33,8 @@ const CHUNK_SIZE = 500; // words per chunk
 const CHUNK_OVERLAP = 50; // words overlap between chunks
 const BATCH_SIZE = 50; // records per upsert batch
 const BATCH_DELAY_MS = 15000; // 15s delay between batches to stay under rate limit
+const IGNORE_EMBEDDING_QUOTA_ERRORS =
+  String(process.env.INGEST_IGNORE_EMBEDDING_QUOTA || '').toLowerCase() === 'true';
 
 const FORCE = process.argv.includes('--force');
 
@@ -153,6 +155,17 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function isEmbeddingQuotaExhaustedError(err) {
+  const details = JSON.stringify({
+    message: err?.message,
+    error: err?.error,
+    status: err?.status,
+  });
+
+  return /RESOURCE_EXHAUSTED/i.test(details) &&
+    (/embedding token limit/i.test(details) || /llama-text-embed-v2/i.test(details) || /status\":429/i.test(details));
+}
+
 // ── Main ──────────────────────────────────────────────────────────────────────
 
 async function main() {
@@ -185,6 +198,8 @@ async function main() {
   let totalChunks = 0;
   let ingestedFiles = 0;
   let skippedFiles = 0;
+  let duplicateFiles = 0;
+  const seenHashes = new Map(); // sha256 -> canonical source filename
 
   for (const file of files) {
     const filePath = path.join(DATA_DIR, file);
@@ -193,6 +208,35 @@ async function main() {
     const fileHash = sha256File(filePath);
 
     console.log(`📖 ${file}`);
+
+    const canonicalSource = seenHashes.get(fileHash);
+    if (canonicalSource && canonicalSource !== file) {
+      const alreadyMarkedDuplicate =
+        !FORCE &&
+        manifest[file]?.sha256 === fileHash &&
+        manifest[file]?.duplicateOf === canonicalSource;
+
+      // If this source was ever ingested with its own vectors, clear them once.
+      if (!alreadyMarkedDuplicate && manifest[file]) {
+        await deleteBySource(index, file);
+      }
+
+      manifest[file] = {
+        sha256: fileHash,
+        chunkCount: 0,
+        duplicateOf: canonicalSource,
+        deduplicatedAt: new Date().toISOString(),
+      };
+      saveManifest(manifest);
+
+      duplicateFiles += 1;
+      console.log(`  ⏭  Duplicate content of ${canonicalSource} (sha256 match) — skipping\n`);
+      continue;
+    }
+
+    if (!canonicalSource) {
+      seenHashes.set(fileHash, file);
+    }
 
     if (!FORCE && manifest[file]?.sha256 === fileHash) {
       console.log(`  ⏭  Unchanged (sha256 match) — skipping\n`);
@@ -274,6 +318,7 @@ async function main() {
   console.log(`✅ Ingestion complete!`);
   console.log(`   Files ingested: ${ingestedFiles}`);
   console.log(`   Files skipped:  ${skippedFiles}`);
+  console.log(`   Files deduped:  ${duplicateFiles}`);
   console.log(`   Chunks uploaded this run: ${totalChunks}`);
   console.log(`   Manifest: ${MANIFEST_PATH}`);
   console.log(`   Index: ${INDEX_NAME} | Namespace: ${NAMESPACE}`);
@@ -281,6 +326,13 @@ async function main() {
 }
 
 main().catch((err) => {
+  if (IGNORE_EMBEDDING_QUOTA_ERRORS && isEmbeddingQuotaExhaustedError(err)) {
+    console.warn('\n⚠️  Ingestion skipped due to Pinecone embedding quota exhaustion.');
+    console.warn('   INGEST_IGNORE_EMBEDDING_QUOTA=true is set, so exiting successfully.');
+    console.warn('   Upgrade plan or wait for monthly quota reset to resume embedding ingest.\n');
+    process.exit(0);
+  }
+
   console.error('\n❌ Ingestion failed:', err.message || err);
   process.exit(1);
 });

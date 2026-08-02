@@ -141,7 +141,8 @@ Curriculum files live in the **[Dls-AI-DataSets](https://github.com/QuantumLogic
    # or: node scripts/ingest.js --force
    ```
 3. The script chunks each book (500 words, 50-word overlap), uses deterministic vector IDs, deletes prior vectors when a file changes, and upserts to the `dls-books` namespace in batches of 50 (15s pause between batches).
-4. Confirm in the Pinecone dashboard that the `dls-books` namespace reflects the new chunks.
+4. Duplicate-book protection: if two files have identical content (same SHA-256), only the first one is ingested; later duplicates are skipped and tracked in `scripts/ingest-manifest.json` via `duplicateOf`, preventing repeated duplicate vectors across runs.
+5. Confirm in the Pinecone dashboard that the `dls-books` namespace reflects the new chunks.
 
 ### Automated hourly ingest (GitHub Actions)
 
@@ -161,6 +162,12 @@ Each run: updates the `data` submodule to latest `main` → `npm ci` → `npm ru
 |---|---|---|
 | `PINECONE_API_KEY` | Yes | Pinecone API access |
 | `PINECONE_INDEX_NAME` | No | Defaults to `dls-chatbot` inside the script when unset |
+
+**Optional CI env flag:**
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `INGEST_IGNORE_EMBEDDING_QUOTA` | `false` | When `true`, treats Pinecone embedding quota exhaustion (`RESOURCE_EXHAUSTED` / 429) as non-fatal so scheduled ingest jobs do not fail solely due to monthly quota limits |
 
 **DataSets secret** (for near-real-time dispatch): `CHATBOT_DISPATCH_TOKEN` — PAT that can create `repository_dispatch` events on this repo. See the DataSets README.
 
