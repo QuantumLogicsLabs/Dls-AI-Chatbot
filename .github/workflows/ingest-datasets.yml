@@ -52,6 +52,7 @@ jobs:
         env:
           PINECONE_API_KEY: ${{ secrets.PINECONE_API_KEY }}
           PINECONE_INDEX_NAME: ${{ secrets.PINECONE_INDEX_NAME }}
+          INGEST_IGNORE_EMBEDDING_QUOTA: "true"
         run: npm run ingest
 
       - name: Commit submodule pointer and ingest manifest
