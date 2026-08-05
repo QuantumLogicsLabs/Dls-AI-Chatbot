@@ -67,6 +67,29 @@ function readTextFile(filePath) {
   return fs.readFileSync(filePath, 'utf-8');
 }
 
+function collectDataFiles(dirPath, baseDir = dirPath) {
+  const entries = fs.readdirSync(dirPath, { withFileTypes: true });
+  const files = [];
+
+  for (const entry of entries) {
+    const fullPath = path.join(dirPath, entry.name);
+
+    if (entry.isDirectory()) {
+      files.push(...collectDataFiles(fullPath, baseDir));
+      continue;
+    }
+
+    const ext = path.extname(entry.name).toLowerCase();
+    if (!ALLOWED_EXTENSIONS.includes(ext)) {
+      continue;
+    }
+
+    files.push(path.relative(baseDir, fullPath).split(path.sep).join('/'));
+  }
+
+  return files;
+}
+
 async function readPdfFile(filePath) {
   const pdfLib = require('pdf-parse');
 
@@ -179,10 +202,7 @@ async function main() {
     process.exit(1);
   }
 
-  const files = fs
-    .readdirSync(DATA_DIR)
-    .filter((f) => ALLOWED_EXTENSIONS.includes(path.extname(f).toLowerCase()))
-    .sort();
+  const files = collectDataFiles(DATA_DIR).sort();
 
   if (!files.length) {
     console.error('❌ No .txt files found in /data folder.');
