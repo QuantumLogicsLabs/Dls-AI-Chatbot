@@ -1,10 +1,10 @@
 node_modules/
 .env
+.vscode/
 
 # Local dump/notes files
 *.txt
 
 # Book files in /data (copyright — do not commit)
 data/*.pdf
-data/*.txt"node_modules/" 
-"node_modules/" 
+data/*.txt

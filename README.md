@@ -54,6 +54,8 @@ Dls-AI-Chatbot/
 - **JWT-gated** — Reuses the same HTTP-only cookie and JWT secret from the main backend in production, while allowing localhost development access for the local UI.
 - **Graceful RAG fallback** — If Pinecone is unreachable or returns no relevant matches, the bot still answers using the base system prompt and Groq's general knowledge. Retrieval failures never block a response.
 
+The repo also contains a separate `website/` git submodule with static developer documentation for the chatbot. It is not part of the Node runtime, but it remains versioned alongside the service for reference.
+
 ---
 
 ## Tech Stack
@@ -102,13 +104,16 @@ RATE_LIMIT_MAX=20
 PINECONE_API_KEY=your-pinecone-api-key-here
 PINECONE_INDEX_NAME=dls-chatbot
 PINECONE_TOP_K=5
+
+# MongoDB (conversation history)
+MONGODB_URI=mongodb+srv://username:password@your-cluster.mongodb.net/dls-ai-chatbot?retryWrites=true&w=majority
 ```
 
 > **Note:** `GROQ_TEMPERATURE=0.5` is intentionally moderate — low enough for factually grounded logic explanations, high enough to keep prose natural. Raise it toward `0.8` for more conversational tone, lower toward `0.2` for stricter technical answers.
 
 > **Pinecone setup:** create a serverless index named to match `PINECONE_INDEX_NAME`, using the "Integrated" embedding configuration with model `llama-text-embed-v2`. No separate embedding API call is needed — Pinecone embeds both the ingested chunks and the incoming query automatically.
 
----
+> **MongoDB setup:** the chatbot stores recent conversation history and feedback in MongoDB, so `MONGODB_URI` must be configured before starting the server or running the CLI test client.
 
 ## Installation
 
@@ -379,7 +384,7 @@ Pinecone's free tier also has its own request rate limits — `scripts/ingest.js
 - `/data` is a submodule pointing at [Dls-AI-DataSets](https://github.com/QuantumLogicsLabs/Dls-AI-DataSets). Parent `.gitignore` still ignores loose local `data/*.txt` / `data/*.pdf` outside submodule workflows.
 - `scripts/ingest-manifest.json` is tracked so CI incremental ingest survives across hourly runs.
 - `package-lock.json` is tracked for reproducible installs.
-- The service is stateless per request — conversation history is not persisted server-side, and RAG retrieval runs fresh on every message with no memory of prior turns. If you want multi-turn memory, send the last N message pairs in the request body and include them in the prompt builder.
+- The service uses short-term server-side memory — the controller persists recent chat turns in MongoDB and replays the last few messages on each request, while RAG retrieval still runs fresh on every message.
 - The bundled local UI is meant for quick testing and onboarding, while the API remains the integration surface for Boolforge or any other frontend.
 
 ---

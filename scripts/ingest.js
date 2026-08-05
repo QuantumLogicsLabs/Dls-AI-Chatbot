@@ -13,7 +13,7 @@
  *   npm run ingest
  *   npm run ingest:force
  *
- * Supported file types: .txt only
+ * Supported file types: .txt and .pdf
  */
 
 require('dotenv').config();
@@ -28,7 +28,7 @@ const DATA_DIR = path.join(__dirname, '..', 'data');
 const MANIFEST_PATH = path.join(__dirname, 'ingest-manifest.json');
 const INDEX_NAME = process.env.PINECONE_INDEX_NAME || 'dls-chatbot';
 const NAMESPACE = 'dls-books';
-const ALLOWED_EXTENSIONS = ['.txt'];
+const ALLOWED_EXTENSIONS = ['.txt', '.pdf'];
 const CHUNK_SIZE = 500; // words per chunk
 const CHUNK_OVERLAP = 50; // words overlap between chunks
 const BATCH_SIZE = 50; // records per upsert batch
